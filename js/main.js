@@ -1,10 +1,10 @@
 // Main variables
 let scene, camera, renderer;
-let particles, geometry, material;
+let particleSystem, particleCount = 8000;
+let particles, geometry, materials = [];
 let mouseX = 0, mouseY = 0;
 let windowHalfX = window.innerWidth / 2;
 let windowHalfY = window.innerHeight / 2;
-let particleCount = 5000;
 
 // Initialize the scene
 function init() {
@@ -16,25 +16,35 @@ function init() {
     camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 1, 10000);
     camera.position.z = 1000;
     
-    // Create particle geometry
+    // Create geometry for flowing particles
     geometry = new THREE.BufferGeometry();
     const positions = new Float32Array(particleCount * 3);
+    const sizes = new Float32Array(particleCount);
     const colors = new Float32Array(particleCount * 3);
     
     const color = new THREE.Color();
     
-    // Create positions and colors for each particle
+    // Create particle system with flowing effect
     for (let i = 0; i < particleCount; i++) {
         const i3 = i * 3;
         
-        // Position
-        positions[i3] = (Math.random() * 2 - 1) * 1000;
-        positions[i3 + 1] = (Math.random() * 2 - 1) * 1000;
-        positions[i3 + 2] = (Math.random() * 2 - 1) * 1000;
+        // Random position in 3D space, but more concentrated in a specific area
+        const x = (Math.random() * 2 - 1) * 800;
+        const y = (Math.random() * 2 - 1) * 800;
+        const z = (Math.random() * 2 - 1) * 800;
         
-        // Color
-        const hue = i / particleCount;
-        color.setHSL(hue, 1.0, 0.5);
+        positions[i3] = x;
+        positions[i3 + 1] = y;
+        positions[i3 + 2] = z;
+        
+        // Random size, but generally elongated
+        sizes[i] = Math.random() * 20 + 5;
+        
+        // Purple color palette with some variation
+        const purple = Math.random() * 0.3 + 0.6; // Higher value for more intense purple
+        const brightness = Math.random() * 0.3 + 0.7; // Control brightness
+        
+        color.setHSL(0.75, purple, brightness); // HSL: purple is around 0.75
         colors[i3] = color.r;
         colors[i3 + 1] = color.g;
         colors[i3 + 2] = color.b;
@@ -42,18 +52,51 @@ function init() {
     
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
     
-    // Material
-    material = new THREE.PointsMaterial({
-        size: 2,
-        vertexColors: true,
+    // Create shader material for better-looking particles
+    const vertexShader = `
+        attribute float size;
+        varying vec3 vColor;
+        
+        void main() {
+            vColor = color;
+            vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+            gl_PointSize = size * (300.0 / -mvPosition.z);
+            gl_Position = projectionMatrix * mvPosition;
+        }
+    `;
+    
+    const fragmentShader = `
+        varying vec3 vColor;
+        
+        void main() {
+            // Create elongated particle shape
+            vec2 coord = gl_PointCoord - vec2(0.5, 0.5);
+            if (length(coord) > 0.5) discard;
+            
+            // Apply radial gradient and elongate particles
+            float alpha = 0.8 - length(coord) * 1.5;
+            if (coord.x > 0.1 || coord.x < -0.1) alpha *= 0.5;
+            
+            gl_FragColor = vec4(vColor, alpha);
+        }
+    `;
+    
+    // Create particle material with shaders
+    const shaderMaterial = new THREE.ShaderMaterial({
+        uniforms: {},
+        vertexShader: vertexShader,
+        fragmentShader: fragmentShader,
+        blending: THREE.AdditiveBlending,
+        depthTest: false,
         transparent: true,
-        opacity: 0.7
+        vertexColors: true
     });
     
-    // Create particles
-    particles = new THREE.Points(geometry, material);
-    scene.add(particles);
+    // Create particle system
+    particleSystem = new THREE.Points(geometry, shaderMaterial);
+    scene.add(particleSystem);
     
     // Set up renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -108,14 +151,51 @@ function onDocumentMouseMove(event) {
 
 // Switch to a more dynamic particle animation
 function particlesEnterLab() {
-    // Update particle positions to be more dynamic
+    // Make more particles visible and increase flow speed
     const positions = geometry.attributes.position.array;
+    const sizes = geometry.attributes.size.array;
     
     for (let i = 0; i < particleCount; i++) {
         const i3 = i * 3;
-        positions[i3] = (Math.random() * 2 - 1) * 2000;
-        positions[i3 + 1] = (Math.random() * 2 - 1) * 2000;
-        positions[i3 + 2] = (Math.random() * 2 - 1) * 2000;
+        // Spread particles out more
+        positions[i3] = (Math.random() * 2 - 1) * 1500;
+        positions[i3 + 1] = (Math.random() * 2 - 1) * 1500;
+        positions[i3 + 2] = (Math.random() * 2 - 1) * 1500;
+        
+        // Increase particle sizes
+        sizes[i] = Math.random() * 30 + 10;
+    }
+    
+    geometry.attributes.position.needsUpdate = true;
+    geometry.attributes.size.needsUpdate = true;
+}
+
+// Create flowing animation for particles
+function updateParticles() {
+    const positions = geometry.attributes.position.array;
+    const time = Date.now() * 0.0001;
+    
+    for (let i = 0; i < particleCount; i++) {
+        const i3 = i * 3;
+        
+        // Create flowing effect with sine/cosine waves
+        // Each particle moves along a unique path
+        const x = positions[i3];
+        const y = positions[i3 + 1];
+        const z = positions[i3 + 2];
+        
+        // Apply flowing movement
+        positions[i3] = x + Math.sin(time + i * 0.01) * 2;
+        positions[i3 + 1] = y + Math.cos(time + i * 0.01) * 2;
+        positions[i3 + 2] = z + Math.sin(time + i * 0.01) * 2;
+        
+        // Reset particles that move too far away
+        const distance = Math.sqrt(x*x + y*y + z*z);
+        if (distance > 1500) {
+            positions[i3] = (Math.random() * 2 - 1) * 800;
+            positions[i3 + 1] = (Math.random() * 2 - 1) * 800;
+            positions[i3 + 2] = (Math.random() * 2 - 1) * 800;
+        }
     }
     
     geometry.attributes.position.needsUpdate = true;
@@ -125,13 +205,16 @@ function particlesEnterLab() {
 function animate() {
     requestAnimationFrame(animate);
     
-    // Rotate particles
-    particles.rotation.x += 0.0005;
-    particles.rotation.y += 0.001;
+    // Update particle positions for flowing effect
+    updateParticles();
     
-    // Move particles based on mouse position
-    particles.rotation.x += (mouseY * 0.0005 - particles.rotation.x) * 0.01;
-    particles.rotation.y += (mouseX * 0.0005 - particles.rotation.y) * 0.01;
+    // Rotate particle system
+    particleSystem.rotation.x += 0.0005;
+    particleSystem.rotation.y += 0.001;
+    
+    // Make rotation responsive to mouse movement
+    particleSystem.rotation.x += (mouseY * 0.0002 - particleSystem.rotation.x) * 0.01;
+    particleSystem.rotation.y += (mouseX * 0.0002 - particleSystem.rotation.y) * 0.01;
     
     renderer.render(scene, camera);
 }
